@@ -9,6 +9,7 @@ import signal
 import socket
 import sys
 import time
+import spidev
 
 import ConfigParser
 import paho.mqtt.client as mqtt
@@ -42,8 +43,10 @@ MQTT_CLEAN_SESSION = config.getboolean("global", "mqtt_clean_session")
 MQTT_LWT = config.get("global", "mqtt_lwt")
 
 MONITOR_PINS = config.get("global", "monitor_pins")
+MONITOR_ADCS = config.get("global", "monitor_adcs")
 MONITOR_POLL = config.getfloat("global", "monitor_poll")
 MONITOR_REFRESH = config.get("global", "monitor_refresh")
+MONITOR_MODE = config.get("global", "gpio_mode")
 
 # Initialise logging
 LOGFORMAT = '%(asctime)-15s %(levelname)-5s %(message)s'
@@ -93,12 +96,28 @@ if len(PINS) == 0:
 else:
     logging.debug("Monitoring pins %s" % PINS)
 
+ADCS = []
+if MONITOR_ADCS:
+    ADCS = map(int, MONITOR_ADCS.split(","))
+
+if len(ADCS) == 0:
+    logging.debug("Not monitoring any adcs")
+else:
+    logging.debug("Monitoring adcs %s" % ADCS)
+
 # Append a column to the list of PINS. This will be used to store state.
 for PIN in PINS:
     PINS[PINS.index(PIN)] = [PIN, -1]
 
-MQTT_TOPIC_IN = MQTT_TOPIC + "/in/+"
-MQTT_TOPIC_OUT = MQTT_TOPIC + "/out/%d"
+for ADC in ADCS:
+    ADCS[ADCS.index(ADC)] = [ADC, -1]
+
+spi = spidev.SpiDev()
+spi.open(0,0)
+
+MQTT_TOPIC_IN = MQTT_TOPIC + "gpio/in/+"
+MQTT_TOPIC_OUT = MQTT_TOPIC + "gpio/out/%d"
+MQTT_TOPIC_ADC = MQTT_TOPIC + "adc/%d"
 
 # Create the MQTT client
 if not MQTT_CLIENT_ID:
@@ -239,13 +258,19 @@ def connect():
     mqttc.will_set(MQTT_LWT, payload="0", qos=0, retain=True)
 
     # Attempt to connect
-    logging.debug("Connecting to %s:%d..." % (MQTT_HOST, MQTT_PORT))
-    try:
-        mqttc.connect(MQTT_HOST, MQTT_PORT, 60)
-    except Exception, e:
-        logging.error("Error connecting to %s:%d: %s" % (MQTT_HOST, MQTT_PORT, str(e)))
-        sys.exit(2)
-
+    count = 1
+    while True:
+        logging.debug("Connecting (try %d) to %s:%d..." % (count, MQTT_HOST, MQTT_PORT))
+        try:
+            mqttc.connect(MQTT_HOST, MQTT_PORT, 60)
+            break
+        except Exception, e:
+            logging.error("Error connecting to %s:%d: %s" % (MQTT_HOST, MQTT_PORT, str(e)))
+            count += 1
+            time.sleep(3)
+            if count > 3:
+                sys.exit(2)
+    
     # Let the connection run forever
     mqttc.loop_start()
 
@@ -262,7 +287,14 @@ def init_gpio():
     Initialise the GPIO library
     """
     GPIO.setwarnings(False)
-    GPIO.setmode(GPIO.BOARD)
+    logging.debug("Using GPIO mode %s" % MONITOR_MODE)
+    if MONITOR_MODE.lower() == "board":
+        GPIO.setmode(GPIO.BOARD)
+    elif MONITOR_MODE.lower() == "bcm":
+        GPIO.setmode(GPIO.BCM)
+    else:
+        logging.error("Invalid GPIO mode %s" % (MONITOR_MODE))
+        sys.exit(3)
 
     for PIN in PINS:
         index = [y[0] for y in PINS].index(PIN[0])
@@ -289,6 +321,14 @@ def refresh():
         logging.debug("Refreshing pin %d state -> %d" % (pin, state))
         mqttc.publish(MQTT_TOPIC_OUT % pin, payload=state, qos=MQTT_QOS, retain=MQTT_RETAIN)
 
+def readadc(adcnum):
+    # read SPI data from MCP3004 chip, 4 possible adc's (0 thru 3)
+    if adcnum >3 or adcnum <0:
+        return-1
+
+    r = spi.xfer2([1,8+adcnum <<4,0])
+    adcout = ((r[1] &3) <<8)+r[2]
+    return adcout
 
 def poll():
     """
@@ -311,6 +351,20 @@ def poll():
                 logging.debug("Pin %d changed from %d to %d" % (pin, oldstate, newstate))
                 mqttc.publish(MQTT_TOPIC_OUT % pin, payload=newstate, qos=MQTT_QOS, retain=MQTT_RETAIN)
                 PINS[index][1] = newstate
+
+        for ADC in ADCS:
+            index = [y[0] for y in ADCS].index(ADC[0])
+            adc = ADCS[index][0] - 1
+
+            oldvalue = ADCS[index][1]
+            newvalue = readadc(adc)
+
+            if newvalue != -1:
+                if abs(newvalue - oldvalue) > 50:
+                    logging.debug("Adc %d changed from %d to %d" % (adc, oldvalue, newvalue))
+                    mqttc.publish(MQTT_TOPIC_ADC % adc, payload=newvalue, qos=MQTT_QOS, retain=MQTT_RETAIN)
+                    ADCS[index][1] = newvalue
+
 
         time.sleep(MONITOR_POLL)
 
