@@ -41,6 +41,8 @@ MQTT_QOS = config.getint("global", "mqtt_qos")
 MQTT_RETAIN = config.getboolean("global", "mqtt_retain")
 MQTT_CLEAN_SESSION = config.getboolean("global", "mqtt_clean_session")
 MQTT_LWT = config.get("global", "mqtt_lwt")
+MQTT_SSL_CERT = config.get("global", "mqtt_ssl_cert")
+MQTT_SSL_INSECURE = config.get("global", "mqtt_ssl_insecure")
 
 MONITOR_PINS = config.get("global", "monitor_pins")
 MONITOR_ADCS = config.get("global", "monitor_adcs")
@@ -253,6 +255,15 @@ def connect():
     # Set the login details
     if MQTT_USERNAME:
         mqttc.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+
+    if MQTT_SSL_CERT:
+        logging.debug("Use ca_certs file: %s" %(MQTT_SSL_CERT))
+        mqttc.tls_set(MQTT_SSL_CERT, None, None, ssl.CERT_REQUIRED, ssl.PROTOCOL_SSLv23, ciphers=None)
+        logging.debug("Use insecure SSL: %s" % (MQTT_SSL_INSECURE))
+        if MQTT_SSL_INSECURE == 'True':
+            mqttc.tls_insecure_set(True)
+        else:
+            mqttc.tls_insecure_set(False)
 
     # Set the Last Will and Testament (LWT) *before* connecting
     mqttc.will_set(MQTT_LWT, payload="0", qos=0, retain=True)
