@@ -148,10 +148,12 @@ def on_connect(mosq, obj, result_code):
         logging.info("Connected to %s:%s" % (MQTT_HOST, MQTT_PORT))
 
         # Subscribe to our incoming topic
+        logging.info("Subscribing to %s, qos %s" % (MQTT_TOPIC_IN, MQTT_QOS))
         mqttc.subscribe(MQTT_TOPIC_IN, qos=MQTT_QOS)
         
         # Subscribe to the monitor refesh topic if required
         if MONITOR_REFRESH:
+            logging.info("Subscribing to %s" % (MONITOR_REFRESH))
             mqttc.subscribe(MONITOR_REFRESH, qos=0)
 
         # Publish retained LWT as per http://stackoverflow.com/questions/19057835/how-to-find-connected-mqtt-client-details/19071979#19071979
