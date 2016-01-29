@@ -10,6 +10,7 @@ import socket
 import sys
 import time
 import spidev
+import ssl
 
 import ConfigParser
 import paho.mqtt.client as mqtt
