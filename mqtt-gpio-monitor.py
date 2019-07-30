@@ -117,6 +117,8 @@ for ADC in ADCS:
 
 spi = spidev.SpiDev()
 spi.open(0,0)
+spi.max_speed_hz = 1350000
+#spi.max_speed_hz = 15200
 
 MQTT_TOPIC_IN = MQTT_TOPIC + "gpio/in/+"
 MQTT_TOPIC_OUT = MQTT_TOPIC + "gpio/out/%d"
